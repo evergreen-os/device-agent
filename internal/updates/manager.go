@@ -3,6 +3,7 @@ package updates
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os/exec"
@@ -540,7 +541,15 @@ func (m *Manager) EnsureRollback(ctx context.Context) ([]api.Event, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !status.NeedsRollback {
+	needsRollback := status.NeedsRollback
+	if !needsRollback {
+		if pending, derr := m.rollbackRequested(ctx); derr != nil {
+			m.logger.Warn("rollback target detection failed", slog.String("error", derr.Error()))
+		} else if pending {
+			needsRollback = true
+		}
+	}
+	if !needsRollback {
 		m.mu.Lock()
 		m.lastRollbackAttempt = ""
 		m.mu.Unlock()
@@ -602,4 +611,21 @@ func (m *Manager) rollback(ctx context.Context) error {
 		return fmt.Errorf("rpm-ostree rollback: %w (%s)", err, strings.TrimSpace(string(output)))
 	}
 	return nil
+}
+
+func (m *Manager) rollbackRequested(ctx context.Context) (bool, error) {
+	if _, err := exec.LookPath("systemctl"); err != nil {
+		return false, nil
+	}
+	cmd := exec.CommandContext(ctx, "systemctl", "is-active", "--quiet", "rollback.target")
+	if err := cmd.Run(); err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			if exitErr.ExitCode() == 3 {
+				return false, nil
+			}
+		}
+		return false, fmt.Errorf("systemctl is-active rollback.target: %w", err)
+	}
+	return true, nil
 }

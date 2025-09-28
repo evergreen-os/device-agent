@@ -68,9 +68,10 @@ type EnrollDeviceResponse struct {
 
 // PolicyEnvelope wraps a policy bundle with metadata.
 type PolicyEnvelope struct {
-	Version   string         `json:"version"`
-	Signature string         `json:"signature"`
-	Policy    PolicyDocument `json:"policy"`
+	Version     string         `json:"version"`
+	Signature   string         `json:"signature"`
+	Policy      PolicyDocument `json:"policy"`
+	DeviceToken string         `json:"device_token,omitempty"`
 }
 
 // PolicyDocument defines the policy data enforced by the agent.
@@ -99,19 +100,38 @@ type UpdatePolicy struct {
 }
 
 type BrowserPolicy struct {
-	Homepage      string   `json:"homepage"`
-	Extensions    []string `json:"extensions"`
-	AllowDevTools bool     `json:"allow_dev_tools"`
+	Homepage         string     `json:"homepage"`
+	Extensions       []string   `json:"extensions"`
+	AllowDevTools    bool       `json:"allow_dev_tools"`
+	ManagedBookmarks []Bookmark `json:"managed_bookmarks"`
+}
+
+type Bookmark struct {
+	Name string `json:"name"`
+	URL  string `json:"url"`
 }
 
 type NetworkPolicy struct {
-	WiFi []WiFiNetwork `json:"wifi"`
+	WiFi   []WiFiNetwork `json:"wifi"`
+	VPNs   []VPNProfile  `json:"vpns"`
+	VPNDNS []string      `json:"vpn_dns"`
 }
 
 type WiFiNetwork struct {
-	SSID       string `json:"ssid"`
-	Passphrase string `json:"passphrase"`
-	Security   string `json:"security"`
+	SSID       string            `json:"ssid"`
+	Passphrase string            `json:"passphrase"`
+	Security   string            `json:"security"`
+	Hidden     bool              `json:"hidden"`
+	Metered    bool              `json:"metered"`
+	EAP        map[string]string `json:"eap"`
+}
+
+type VPNProfile struct {
+	Name        string            `json:"name"`
+	ServiceType string            `json:"service_type"`
+	Data        map[string]string `json:"data"`
+	Secrets     map[string]string `json:"secrets"`
+	AutoConnect bool              `json:"auto_connect"`
 }
 
 type SecurityPolicy struct {
@@ -119,6 +139,7 @@ type SecurityPolicy struct {
 	SSHEnabled     bool     `json:"ssh_enabled"`
 	USBGuard       bool     `json:"usbguard"`
 	USBGuardRules  []string `json:"usbguard_rules"`
+	AllowRootLogin bool     `json:"allow_root_login"`
 }
 
 // PullPolicyRequest requests a new policy if changed.

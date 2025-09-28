@@ -34,6 +34,7 @@ type Agent struct {
 	policyManager  *policy.Manager
 	stateCollector *state.Collector
 	eventQueue     *events.Queue
+	stateQueue     *state.Queue
 	updatesManager *updates.Manager
 	loginWatcher   *logins.Watcher
 	attestManager  *attestation.Manager
@@ -70,6 +71,7 @@ func New(ctx context.Context, cfg config.Config) (*Agent, error) {
 	policyManager := policy.NewManager(logger, cfg, verifier, appsManager, browserManager, updatesManager, networkManager, securityManager)
 	collector := state.NewCollector(logger, appsManager, updatesManager)
 	queue := events.NewQueue(cfg.EventQueuePath)
+	stateQueue := state.NewQueue(cfg.StateQueuePath)
 	loginWatcher := logins.NewWatcher(logger)
 	attestManager := attestation.NewManager(logger)
 	return &Agent{
@@ -80,6 +82,7 @@ func New(ctx context.Context, cfg config.Config) (*Agent, error) {
 		policyManager:  policyManager,
 		stateCollector: collector,
 		eventQueue:     queue,
+		stateQueue:     stateQueue,
 		updatesManager: updatesManager,
 		loginWatcher:   loginWatcher,
 		attestManager:  attestManager,
@@ -202,6 +205,14 @@ func (a *Agent) pullAndApplyPolicy(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if envelope.DeviceToken != "" && envelope.DeviceToken != a.credentials.DeviceToken {
+		a.logger.Info("rotating device token")
+		a.credentials.DeviceToken = envelope.DeviceToken
+	}
+	a.credentials.Version = envelope.Version
+	if err := a.enrollManager.Persist(a.credentials, envelope); err != nil {
+		return fmt.Errorf("persist credentials: %w", err)
+	}
 	return nil
 }
 
@@ -230,13 +241,36 @@ func (a *Agent) reportState(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	req := api.ReportStateRequest{
-		DeviceID: a.credentials.DeviceID,
-		State:    snapshot,
+	if a.stateQueue != nil {
+		if err := a.stateQueue.Append(snapshot); err != nil {
+			return fmt.Errorf("persist state snapshot: %w", err)
+		}
+		for {
+			pending, err := a.stateQueue.Load()
+			if err != nil {
+				return err
+			}
+			if len(pending) == 0 {
+				break
+			}
+			current := pending[0]
+			req := api.ReportStateRequest{DeviceID: a.credentials.DeviceID, State: current}
+			loopCtx, cancel := context.WithTimeout(ctx, a.stateInterval)
+			err = a.client.ReportState(loopCtx, a.credentials.DeviceToken, req)
+			cancel()
+			if err != nil {
+				return err
+			}
+			if err := a.stateQueue.Replace(pending[1:]); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
-	ctx, cancel := context.WithTimeout(ctx, a.stateInterval)
+	req := api.ReportStateRequest{DeviceID: a.credentials.DeviceID, State: snapshot}
+	loopCtx, cancel := context.WithTimeout(ctx, a.stateInterval)
 	defer cancel()
-	if err := a.client.ReportState(ctx, a.credentials.DeviceToken, req); err != nil {
+	if err := a.client.ReportState(loopCtx, a.credentials.DeviceToken, req); err != nil {
 		return err
 	}
 	return nil

@@ -154,3 +154,8 @@ func (m *Manager) clearEnrollmentConfig() error {
 	}
 	return nil
 }
+
+// Persist writes credentials and the latest policy bundle atomically.
+func (m *Manager) Persist(cred Credentials, policy api.PolicyEnvelope) error {
+	return m.saveCredentials(cred, policy)
+}
