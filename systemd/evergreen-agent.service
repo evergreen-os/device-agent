@@ -1,0 +1,19 @@
+[Unit]
+Description=Evergreen Device Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/evergreen-agent --config /etc/evergreen/agent/agent.yaml
+Restart=on-failure
+RestartSec=10
+User=root
+Group=root
+Environment=HOME=/var/lib/evergreen
+WorkingDirectory=/var/lib/evergreen
+RuntimeDirectory=evergreen-agent
+RuntimeDirectoryMode=0750
+
+[Install]
+WantedBy=multi-user.target
