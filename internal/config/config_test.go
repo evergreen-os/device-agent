@@ -35,6 +35,7 @@ func TestLoadAndValidate(t *testing.T) {
                 "device_token_path": "/etc/evergreen/token",
                 "policy_cache_path": "/var/lib/evergreen/policy.json",
                 "event_queue_path": "/var/lib/evergreen/events.json",
+                "state_queue_path": "/var/lib/evergreen/state.json",
                 "policy_public_key": "/etc/evergreen/policy.pem",
                 "enrollment": {
                         "pre_shared_key": "secret",

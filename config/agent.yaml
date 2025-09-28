@@ -3,6 +3,7 @@
   "device_token_path": "/etc/evergreen/agent/secrets.json",
   "policy_cache_path": "/var/lib/evergreen/policy.json",
   "event_queue_path": "/var/lib/evergreen/events.json",
+  "state_queue_path": "/var/lib/evergreen/state.json",
   "policy_public_key": "config/policy-public.pem",
   "enrollment": {
     "pre_shared_key": "",

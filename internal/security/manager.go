@@ -2,6 +2,7 @@ package security
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -42,13 +43,25 @@ func NewManager(logger *slog.Logger, opts ...Option) *Manager {
 // Apply enforces security controls and emits events.
 func (m *Manager) Apply(ctx context.Context, policy api.SecurityPolicy) ([]api.Event, error) {
 	var eventsOut []api.Event
-	if policy.SELinuxEnforce {
-		if err := m.ensureSELinux(true); err != nil {
-			m.logger.Error("failed to enforce selinux", slog.String("error", err.Error()))
-			eventsOut = append(eventsOut, events.NewEvent("security.selinux.failure", map[string]string{"error": err.Error()}))
-		} else {
-			eventsOut = append(eventsOut, events.NewEvent("security.selinux.success", map[string]string{"state": "enforcing"}))
+	if err := m.ensureSELinux(policy.SELinuxEnforce); err != nil {
+		m.logger.Error("failed to configure selinux", slog.String("error", err.Error()))
+		eventsOut = append(eventsOut, events.NewEvent("security.selinux.failure", map[string]string{"error": err.Error()}))
+	} else {
+		state := "permissive"
+		if policy.SELinuxEnforce {
+			state = "enforcing"
 		}
+		eventsOut = append(eventsOut, events.NewEvent("security.selinux.success", map[string]string{"state": state}))
+	}
+	if err := m.configureSSH(policy.AllowRootLogin); err != nil {
+		m.logger.Error("failed to configure ssh", slog.String("error", err.Error()))
+		eventsOut = append(eventsOut, events.NewEvent("security.ssh.config.failure", map[string]string{"error": err.Error()}))
+	} else {
+		mode := "disabled"
+		if policy.AllowRootLogin {
+			mode = "enabled"
+		}
+		eventsOut = append(eventsOut, events.NewEvent("security.ssh.config.success", map[string]string{"root_login": mode}))
 	}
 	if err := m.toggleService(ctx, "sshd", policy.SSHEnabled); err != nil {
 		m.logger.Error("failed to toggle ssh", slog.String("error", err.Error()))
@@ -66,6 +79,10 @@ func (m *Manager) Apply(ctx context.Context, policy api.SecurityPolicy) ([]api.E
 			eventsOut = append(eventsOut, events.NewEvent("security.usbguard.failure", map[string]string{"error": err.Error()}))
 		} else {
 			eventsOut = append(eventsOut, events.NewEvent("security.usbguard.rules", map[string]string{"count": strconv.Itoa(len(policy.USBGuardRules))}))
+		}
+	} else {
+		if err := m.removeUSBGuardRules(); err != nil {
+			m.logger.Warn("failed to remove usbguard rules", slog.String("error", err.Error()))
 		}
 	}
 	if err := m.toggleService(ctx, "usbguard", policy.USBGuard); err != nil {
@@ -137,6 +154,33 @@ func (m *Manager) writeUSBGuardRules(rules []string) error {
 	}
 	if err := os.Rename(tmp, m.usbGuardRulesPath); err != nil {
 		return fmt.Errorf("commit usbguard rules: %w", err)
+	}
+	return nil
+}
+
+func (m *Manager) removeUSBGuardRules() error {
+	if err := os.Remove(m.usbGuardRulesPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+func (m *Manager) configureSSH(allowRoot bool) error {
+	path := "/etc/ssh/sshd_config.d/evergreen.conf"
+	if err := util.EnsureParentDir(path, 0o755); err != nil {
+		return err
+	}
+	mode := "no"
+	if allowRoot {
+		mode = "yes"
+	}
+	content := fmt.Sprintf("# Managed by evergreen device agent\nPermitRootLogin %s\n", mode)
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(content), 0o644); err != nil {
+		return fmt.Errorf("write ssh config: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return fmt.Errorf("commit ssh config: %w", err)
 	}
 	return nil
 }

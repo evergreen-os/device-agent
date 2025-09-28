@@ -9,14 +9,15 @@ import (
 
 // Config models the agent configuration loaded from disk.
 type Config struct {
-	BackendURL      string     `json:"backend_url"`
-	DeviceTokenPath string     `json:"device_token_path"`
-	PolicyCachePath string     `json:"policy_cache_path"`
-	EventQueuePath  string     `json:"event_queue_path"`
-	PolicyPublicKey string     `json:"policy_public_key"`
-	Enrollment      Enrollment `json:"enrollment"`
-	Intervals       Intervals  `json:"intervals"`
-	Logging         Logging    `json:"logging"`
+        BackendURL      string     `json:"backend_url"`
+        DeviceTokenPath string     `json:"device_token_path"`
+        PolicyCachePath string     `json:"policy_cache_path"`
+        EventQueuePath  string     `json:"event_queue_path"`
+        StateQueuePath  string     `json:"state_queue_path"`
+        PolicyPublicKey string     `json:"policy_public_key"`
+        Enrollment      Enrollment `json:"enrollment"`
+        Intervals       Intervals  `json:"intervals"`
+        Logging         Logging    `json:"logging"`
 }
 
 // Enrollment specific settings.
@@ -93,12 +94,15 @@ func (c Config) Validate() error {
 	if c.PolicyCachePath == "" {
 		return fmt.Errorf("policy_cache_path is required")
 	}
-	if c.EventQueuePath == "" {
-		return fmt.Errorf("event_queue_path is required")
-	}
-	if c.PolicyPublicKey == "" {
-		return fmt.Errorf("policy_public_key is required")
-	}
+        if c.EventQueuePath == "" {
+                return fmt.Errorf("event_queue_path is required")
+        }
+        if c.StateQueuePath == "" {
+                return fmt.Errorf("state_queue_path is required")
+        }
+        if c.PolicyPublicKey == "" {
+                return fmt.Errorf("policy_public_key is required")
+        }
 	if c.Intervals.PolicyPoll.Duration == 0 {
 		return fmt.Errorf("intervals.policy_poll must be >0")
 	}

@@ -11,14 +11,39 @@ Fedora Silverblue derivatives and is designed to run unattended under systemd.
   `EnrollDevice` RPC, and persists the issued device token with `0600` permissions.
 - **Signed policy enforcement** – periodically pulls versioned policy bundles,
   verifies signatures against a pinned Ed25519 public key, caches them locally,
-  and reconciles Flatpak apps, browser defaults, rpm-ostree updates, NetworkManager
-  Wi-Fi profiles, and SELinux/SSH/USBGuard controls.
+  and reconciles Flatpak apps, Chromium policies (homepage, extensions, bookmarks,
+  developer tools), rpm-ostree updates, NetworkManager Wi-Fi/VPN profiles, and
+  SELinux/SSH/USBGuard controls.
 - **State + telemetry** – gathers Flatpak inventory, rpm-ostree status, disk usage,
-  and battery capacity before sending regular `ReportState` heartbeats.
+  and battery capacity before sending regular `ReportState` heartbeats. Snapshots
+  are persisted to disk and retried when connectivity is restored.
 - **Durable events** – records install/update/security results to a local JSON queue
   and flushes them to the backend with retry semantics.
 - **Resilient execution loop** – gracefully handles missing host tooling, transient
   network failures, and persists its last-known-good policy and event queue.
+- **TPM attestation** – periodically collects PCR quotes from the system TPM and
+  submits them to the Evergreen backend when hardware support is present.
+
+## Control-plane loops
+
+```
+┌──────────┐   enrolls & caches   ┌───────────┐
+│ Enrollment│ ───────────────────▶ │ Credentials│
+└────┬─────┘                      └────┬──────┘
+     │                               │
+     │ signed policy                 │ rotation
+     ▼                               │
+┌──────────┐    apply + events    ┌───▼──────────┐
+│ Policy   │ ───────────────────▶ │ Enforcement │
+└────┬─────┘                      └────┬────────┘
+     │                               │
+     │ telemetry & queue             │ attestation
+     ▼                               ▼
+┌──────────┐    buffered state    ┌────────────┐
+│ State    │ ───────────────────▶ │ Event/State│
+│ Collector│                      │ Queues      │
+└──────────┘                      └────────────┘
+```
 
 ## Repository layout
 
@@ -67,6 +92,7 @@ all supported keys:
   "device_token_path": "/etc/evergreen/agent/secrets.json",
   "policy_cache_path": "/var/lib/evergreen/policy.json",
   "event_queue_path": "/var/lib/evergreen/events.json",
+  "state_queue_path": "/var/lib/evergreen/state.json",
   "policy_public_key": "config/policy-public.pem",
   "enrollment": {
     "pre_shared_key": "",
@@ -92,7 +118,8 @@ Key fields:
   permissions.
 - `policy_public_key` – Ed25519 public key (PEM or raw bytes) used to validate
   policy signatures.
-- `policy_cache_path` / `event_queue_path` – persisted policy bundle and event log.
+- `policy_cache_path` / `event_queue_path` / `state_queue_path` – persisted policy
+  bundle, event log, and buffered state snapshots.
 - `intervals` – control how often policy, state, and event loops run. Intervals
   accept Go duration strings (e.g. `"5m"`).
 
@@ -112,9 +139,29 @@ The agent performs the following lifecycle:
    the respective managers (Flatpak, browser, rpm-ostree, NetworkManager,
    SELinux/SSH/USBGuard). All actions generate durable events.
 3. **State loop:** Periodically gathers state (Flatpaks, rpm-ostree status, disk
-   usage, battery level, last error) and sends `ReportState` payloads.
+   usage, battery level, last error) and writes snapshots to the durable state
+   queue before sending `ReportState` payloads with retry semantics.
 4. **Event loop:** Flushes queued events to `/api/v1/devices/events`, retrying
    until acknowledged.
+5. **Attestation loop:** When TPM hardware is detected, collects PCR quotes and
+   submits them to `/api/v1/devices/attest` for remote verification.
+
+## Development workflow
+
+- **Build:** `go build ./cmd/agent`
+- **Test:** `go test ./...`
+- **Run on a dev VM:**
+  1. Copy `config/agent.yaml` to the VM and adjust URLs/paths.
+  2. Place the pinned policy signing key referenced by `policy_public_key`.
+  3. Execute `go run ./cmd/agent --config /path/to/agent.yaml` (requires network
+     access to the Evergreen backend and rpm-ostree tooling on the host).
+
+### Secrets & credential rotation
+
+Device credentials (device ID/token) are written atomically with `0600`
+permissions. When the backend rotates the device token (returned alongside policy
+bundles), the agent automatically persists the new token together with the policy
+version so restarts pick up the latest credentials.
 
 All loops honour cancellation via `SIGINT`/`SIGTERM` and will record the last error
 observed so it surfaces in subsequent state reports.
@@ -143,8 +190,7 @@ re-used for integration tests or mock servers.
 
 ## Next steps
 
-- Wire rpm-ostree maintenance windows and reboot orchestration using policy data.
-- Expand retry logic with exponential backoff utilising the configured intervals.
-- Extend the event model with attestation and VPN policy handling as they arrive in
-  future roadmap milestones.
+- Expand hardware inventory reporting (battery health, peripheral status).
+- Add integration tests against a mocked rpm-ostree/systemd environment.
+- Surface richer attestation failure diagnostics in the event stream.
 
